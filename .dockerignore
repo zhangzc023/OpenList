@@ -1,0 +1,25 @@
+# ===== OpenList 自定义部署用 .dockerignore =====
+# 注意：不能排除 .git（build.sh 用 git log 取 commit）、
+# 不能排除 public/dist（go:embed 会把前端打进二进制，构建时由 build.sh 重建）。
+
+# 本地数据 / 构建产物（不进镜像）
+data/
+bin/
+build/
+tmp/
+log/
+output/
+dist/
+
+# 本地二进制与数据库
+*.exe
+*.dll
+*.db
+*.so
+*.dylib
+
+# 开发 / 抓包遗留的临时文件
+mi_*.js
+tmp_*.py
+ol_upload_test.txt
+*.air.toml

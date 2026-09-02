@@ -1,14 +1,34 @@
+# ===== OpenList 自定义部署（带 xiaomi 驱动）=====
+# 用法：在代码根目录执行
+#   docker compose up -d --build     # 首次：构建镜像 + 启动
+#   docker compose logs -f openlist  # 看日志
+#   docker compose restart           # 重启
+#   docker compose down              # 停止（保留数据卷）
+#
+# 数据目录：宿主机 /opt/openlist/data（可自行改成你想要的路径），
+# 首次启动前把本地 data 目录拷到这里（并改掉 config.json 里的 Windows 反斜杠路径）。
+
 services:
   openlist:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # 官方基础镜像：base / aria2 / ffmpeg / aio
+        BASE_IMAGE_TAG: base
+        # 若 build.sh 从 GitHub 下载前端 dist 失败，可在这里显式传入代理（改成你服务器的代理地址）：
+        # HTTP_PROXY: http://127.0.0.1:7897
+        # HTTPS_PROXY: http://127.0.0.1:7897
+    image: openlist-xiaomi:latest
     restart: always
+    container_name: openlist
     volumes:
-      - '/etc/openlist:/opt/openlist/data'
+      - '/opt/openlist/data:/opt/openlist/data'
     ports:
       - '5244:5244'
       - '5245:5245'
+    # 官方推荐以 root 运行，规避数据目录权限检查；如需非 root 请给数据目录 chown 后改掉
     user: '0:0'
     environment:
       - UMASK=022
       - TZ=Asia/Shanghai
-    container_name: openlist
-    image: 'openlistteam/openlist:latest'

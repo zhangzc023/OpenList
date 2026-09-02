@@ -4,6 +4,9 @@ ARG BASE_IMAGE_TAG=base
 FROM alpine:edge AS builder
 LABEL stage=go-builder
 WORKDIR /app/
+# 国内构建加速：docker compose build --build-arg GOPROXY=... 可覆盖（默认官方源）
+ARG GOPROXY=https://proxy.golang.org,direct
+ENV GOPROXY=${GOPROXY}
 RUN apk add --no-cache bash curl jq gcc git go musl-dev
 COPY go.mod go.sum ./
 RUN go mod download
