@@ -79,12 +79,13 @@ func (a *API) fetchApiInner(ctx context.Context, rawURL string, opts Options, al
 		return nil, err
 	}
 	if res.StatusCode == http.StatusUnauthorized {
-		Drain(res)
-		// 用 passport 长期会话自动续期后重试一次（避免死循环）
-		if allowRenew && a.account.TryRenewServiceToken(ctx) {
+		// GET/HEAD 走 Cookie 鉴权：续期后 Cookie 自动更新，可直接重试；
+		// POST 的 serviceToken 在 body 里，续期后需重建 body，统一由 postForm 处理。
+		if allowRenew && opts.Method != http.MethodPost && a.account.TryRenewServiceToken(ctx) {
+			Drain(res)
 			return a.fetchApiInner(ctx, rawURL, opts, false)
 		}
-		return nil, &MiLoginError{Code: 401, Msg: "登录态已失效，请在管理页重新扫码登录"}
+		return res, nil
 	}
 	return res, nil
 }
@@ -93,19 +94,43 @@ func (a *API) fetchApiInner(ctx context.Context, rawURL string, opts Options, al
 // 前端封装（i.mi.com /drive/h5 main bundle，模块 iR4f）对所有 POST 自动：
 //   content-type: application/x-www-form-urlencoded; charset=UTF-8
 //   body 附加 serviceToken（从 cookie 读取）
+// serviceToken 失效（HTTP 401）时自动用 passport 续期，并以新 token 重建 body 重试一次。
 func (a *API) postForm(ctx context.Context, apiPath string, form url.Values) (*http.Response, error) {
-	if form == nil {
-		form = url.Values{}
+	build := func() url.Values {
+		f := url.Values{}
+		for k, v := range form {
+			f[k] = append([]string(nil), v...)
+		}
+		f.Set("serviceToken", a.account.GetServiceToken())
+		return f
 	}
-	form.Set("serviceToken", a.account.GetServiceToken())
-	return a.fetchApi(ctx, fmt.Sprintf("%s%s", imiHost, apiPath), Options{
-		Method: http.MethodPost,
-		Body:   strings.NewReader(form.Encode()),
-		Headers: map[string]string{
-			"content-type": "application/x-www-form-urlencoded; charset=UTF-8",
-			"origin":       imiHost,
-		},
-	})
+	send := func() (*http.Response, error) {
+		return a.fetchApi(ctx, fmt.Sprintf("%s%s", imiHost, apiPath), Options{
+			Method: http.MethodPost,
+			Body:   strings.NewReader(build().Encode()),
+			Headers: map[string]string{
+				"content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+				"origin":       imiHost,
+			},
+		})
+	}
+
+	for attempt := 0; attempt < 2; attempt++ {
+		res, err := send()
+		if err != nil {
+			return nil, err
+		}
+		if res.StatusCode == http.StatusUnauthorized {
+			Drain(res)
+			// 首次 401：用 passport 续期后重建 body（新 token）重试；再次失败不再续期
+			if attempt == 0 && a.account.TryRenewServiceToken(ctx) {
+				continue
+			}
+			return nil, &MiLoginError{Code: 401, Msg: "登录态已失效，请在管理页重新扫码登录"}
+		}
+		return res, nil
+	}
+	return nil, &MiLoginError{Code: 401, Msg: "登录态已失效，请在管理页重新扫码登录"}
 }
 
 // decode 解析响应 JSON 并校验业务结果

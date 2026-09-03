@@ -183,8 +183,12 @@ func (a *Account) SetOnRenewed(f func()) { a.onRenewed = f }
 //
 // 返回 true 表示续期成功（Jar 与 a.ServiceToken 已更新，且已触发 onRenewed 持久化）。
 func (a *Account) TryRenewServiceToken(ctx context.Context) bool {
+	hasPassInfo := a.client.Jar.Get("passInfo") != ""
+	hasCUserID := a.client.Jar.Get("cUserId") != ""
+	log.Infof("[xiaomi] 尝试自动续期 serviceToken（passInfo=%v cUserId=%v deviceId=%v）",
+		hasPassInfo, hasCUserID, a.client.Jar.Get("deviceId") != "")
 	// 无 passport 长期凭证则无法续期（只能重新扫码）
-	if a.client.Jar.Get("passInfo") == "" && a.client.Jar.Get("cUserId") == "" {
+	if !hasPassInfo && !hasCUserID {
 		log.Warn("[xiaomi] 无 passport 长期凭证，无法自动续期，需重新扫码")
 		return false
 	}

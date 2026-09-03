@@ -113,8 +113,17 @@ func (d *XiaomiDrive) Init(ctx context.Context) error {
 					return nil
 				}
 			}
+			// serviceToken 已失效：先尝试用 passport 长期凭证自动续期，成功则直接恢复会话
+			if d.account.TryRenewServiceToken(ctx) {
+				if ok2, _ := d.account.CheckDrive(ctx); ok2 {
+					if err := d.account.FinishLogin(); err == nil {
+						log.Info("[xiaomi] 已通过 passport 自动续期恢复会话")
+						return nil
+					}
+				}
+			}
 		}
-		// 会话失效，清除并继续走扫码/Cookie
+		// 续期也失败，清除并继续走扫码/Cookie
 		d.Addition.SessionCookies = ""
 		d.account.Reset()
 	}
