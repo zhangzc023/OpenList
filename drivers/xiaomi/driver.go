@@ -144,7 +144,7 @@ func (d *XiaomiDrive) Ready() bool {
 	return d.account != nil && d.account.Ready()
 }
 
-// saveSession 把当前登录态序列化保存到 Addition 并持久化
+// saveSession 把当前登录态（全部域的 Cookie，含 passport 长期凭证）序列化保存到 Addition 并持久化
 func (d *XiaomiDrive) saveSession() {
 	cookies := d.account.SerializeCookies()
 	if len(cookies) == 0 {
@@ -154,16 +154,7 @@ func (d *XiaomiDrive) saveSession() {
 	if err != nil {
 		return
 	}
-	d.account.mu.Lock()
-	uid := d.account.UserID
-	did := d.account.DeviceID
-	token := d.account.ServiceToken
-	d.account.mu.Unlock()
-
 	d.Addition.SessionCookies = string(b)
-	d.Addition.UserID = uid
-	d.Addition.DeviceID = did
-	d.Addition.ServiceToken = token
 	op.MustSaveDriverStorage(d)
 }
 
