@@ -15,8 +15,10 @@ import (
 // 注：service_token / user_id / device_id 为冗余字段（驱动只写不读），已移除。
 type Addition struct {
 	Cookie         string `json:"cookie" secret:"true" help:"i.mi.com 浏览器 Cookie（留空则使用扫码登录）"`
-	// ignore: 会话 Cookie 为驱动自动维护，不在编辑页显示，但仍持久化（含 passport 长期凭证，用于自动续期）
-	SessionCookies string `json:"session_cookies" ignore:"true" secret:"true" help:"登录会话 Cookie（自动维护）"`
+	// 注意：session_cookies 不能加 ignore（会从表单消失，OpenList 保存存储时
+	// 用请求 addition 全量覆盖数据库，导致每次保存都会被清空）。必须保留在
+	// Addition 中并随表单回传，才能持久化会话、实现自动续期。
+	SessionCookies string `json:"session_cookies" secret:"true" help:"登录会话 Cookie（自动维护，含 passport 长期凭证，用于自动续期；请勿手动修改）"`
 }
 
 var config = driver.Config{
