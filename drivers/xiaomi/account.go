@@ -146,6 +146,9 @@ type Account struct {
 	stopCh   chan struct{}
 	stopOnce sync.Once
 	wg       sync.WaitGroup
+
+	// onRenewed serviceToken 自动续期成功后的回调（驱动用它持久化新会话）
+	onRenewed func()
 }
 
 // NewAccount 创建账号实例
@@ -165,6 +168,48 @@ func (a *Account) GetServiceToken() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.ServiceToken
+}
+
+// SetOnRenewed 设置 serviceToken 自动续期成功回调（驱动用它持久化新会话）
+func (a *Account) SetOnRenewed(f func()) { a.onRenewed = f }
+
+// TryRenewServiceToken 用 passport 长期会话自动续期 serviceToken。
+//
+// 机制：请求 i.mi.com 触发服务登录（SSO），服务端发现 serviceToken 失效后
+// 302 到 account.xiaomi.com；该域有 passport 长期凭证（passInfo/cUserId/
+// deviceId），服务端据此自动登录并 302 回 i.mi.com 重新签发 serviceToken。
+// 网页端正是靠这一机制长期免登录（实测：删除 i.mi.com serviceToken 后仅靠
+// passport 会话访问 i.mi.com 即自动重签）。
+//
+// 返回 true 表示续期成功（Jar 与 a.ServiceToken 已更新，且已触发 onRenewed 持久化）。
+func (a *Account) TryRenewServiceToken(ctx context.Context) bool {
+	// 无 passport 长期凭证则无法续期（只能重新扫码）
+	if a.client.Jar.Get("passInfo") == "" && a.client.Jar.Get("cUserId") == "" {
+		log.Warn("[xiaomi] 无 passport 长期凭证，无法自动续期，需重新扫码")
+		return false
+	}
+	renewCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	// 重放 SSO：跟随 i.mi.com 首页重定向链，沿途重签 serviceToken
+	res, err := a.client.Request(imiHost+"/", Options{Ctx: renewCtx}, 10)
+	if err != nil {
+		log.Warnf("[xiaomi] 自动续期请求失败: %v", err)
+		return false
+	}
+	Drain(res)
+	newST := a.client.Jar.Get("serviceToken")
+	if newST == "" {
+		log.Warn("[xiaomi] 自动续期后仍未取得 serviceToken")
+		return false
+	}
+	a.mu.Lock()
+	a.ServiceToken = newST
+	a.mu.Unlock()
+	log.Infof("[xiaomi] serviceToken 自动续期成功")
+	if a.onRenewed != nil {
+		a.onRenewed()
+	}
+	return true
 }
 
 // Ready 是否已登录
@@ -281,10 +326,13 @@ func (a *Account) startRenewal() {
 				})
 				if err == nil {
 					if res.StatusCode == http.StatusUnauthorized {
-						a.mu.Lock()
-						a.state = "idle"
-						a.mu.Unlock()
-						log.Warn("保活接口返回 401，会话可能已过期")
+						// serviceToken 已失效：尝试用 passport 会话自动续期
+						if !a.TryRenewServiceToken(ctx) {
+							a.mu.Lock()
+							a.state = "idle"
+							a.mu.Unlock()
+							log.Warn("保活续期失败，会话可能已过期，需重新扫码")
+						}
 					}
 					Drain(res)
 				}

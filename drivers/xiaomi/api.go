@@ -60,8 +60,13 @@ func NewAPI(acc *Account) *API { return &API{account: acc} }
 
 // ---------- 通用请求 ----------
 
-// fetchApi 带 401 重试的 API 请求
+// fetchApi 带 401 自动续期的 API 请求
 func (a *API) fetchApi(ctx context.Context, rawURL string, opts Options) (*http.Response, error) {
+	return a.fetchApiInner(ctx, rawURL, opts, true)
+}
+
+// fetchApiInner 内部实现；allowRenew 控制是否允许触发 serviceToken 自动续期
+func (a *API) fetchApiInner(ctx context.Context, rawURL string, opts Options, allowRenew bool) (*http.Response, error) {
 	if opts.Headers == nil {
 		opts.Headers = map[string]string{}
 	}
@@ -75,7 +80,10 @@ func (a *API) fetchApi(ctx context.Context, rawURL string, opts Options) (*http.
 	}
 	if res.StatusCode == http.StatusUnauthorized {
 		Drain(res)
-		// 登录态失效：无自动重登方式，直接引导用户重新扫码
+		// 用 passport 长期会话自动续期后重试一次（避免死循环）
+		if allowRenew && a.account.TryRenewServiceToken(ctx) {
+			return a.fetchApiInner(ctx, rawURL, opts, false)
+		}
 		return nil, &MiLoginError{Code: 401, Msg: "登录态已失效，请在管理页重新扫码登录"}
 	}
 	return res, nil

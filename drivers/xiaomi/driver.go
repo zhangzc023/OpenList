@@ -94,6 +94,8 @@ func (d *XiaomiDrive) Init(ctx context.Context) error {
 	if d.account == nil {
 		d.account = NewAccount(d.client)
 	}
+	// serviceToken 自动续期成功后持久化新会话（passport 长期凭证续期）
+	d.account.SetOnRenewed(func() { d.saveSession() })
 	d.api = NewAPI(d.account)
 	if d.idCache == nil {
 		d.idCache = newIDCache()
